@@ -1,0 +1,2 @@
+{"ts": 1787649531.7741249, "iso": "2026-08-25T16:18:51", "event": "state_change", "region": "b", "to": "UNHEALTHY", "reason": "pool_state=warm;model_weights_missing;vector_db_empty(count=0)", "consecutive_fails": 3, "interval_s": 5.0, "threshold": 3}
+{"ts": 1787649555.56288, "iso": "2026-08-25T16:19:15", "event": "state_change", "region": "a", "to": "UNHEALTHY", "reason": "ReadTimeout", "consecutive_fails": 3, "interval_s": 5.0, "threshold": 3}
