@@ -29,13 +29,54 @@ URL = {"a": "http://127.0.0.1:8001", "b": "http://127.0.0.1:8002"}
 
 
 def probe(region: str, timeout: float) -> tuple[bool, str]:
-    """TODO: trả về (ready, reason). Timeout PHẢI có — netblock làm request treo mãi."""
-    raise NotImplementedError
+    """Trả về (ready, reason). Timeout PHẢI có — netblock làm request treo mãi."""
+    try:
+        r = httpx.get(f"{URL[region]}/readyz", timeout=timeout)
+        body = r.json()
+        # /readyz 200 khi ready; khi 503 body vẫn có danh sách reasons cụ thể.
+        if r.status_code == 200:
+            return True, "ok"
+        return False, ";".join(body.get("reasons", [f"http_{r.status_code}"]))
+    except Exception as e:  # netblock -> ReadTimeout; SIGKILL -> ConnectError
+        return False, type(e).__name__
 
 
-def run(interval: float, timeout: float, threshold: int, duration: float, out: pathlib.Path):
-    """TODO: vòng lặp poll + phát hiện transition + ghi JSONL."""
-    raise NotImplementedError
+def run(interval: float, timeout: float, threshold: int, duration: float,
+        out: pathlib.Path):
+    """Vòng lặp poll + phát hiện transition + ghi JSONL."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # state giữ per-region: trạng thái hiện tại + chuỗi fail liên tiếp.
+    state = {r: {"status": None, "fails": 0} for r in URL}
+    t_end = time.time() + duration
+    with out.open("a") as f:
+        while time.time() < t_end:
+            for region in sorted(URL):
+                ready, reason = probe(region, timeout)
+                s = state[region]
+                if ready:
+                    s["fails"] = 0
+                    # Trạng thái đầu tiên KHÔNG ghi log — chỉ log khi có sự CHUYỂN
+                    # trạng thái thật (UNHEALTHY -> HEALTHY), tránh nhiễu lúc boot.
+                    s["status"] = "HEALTHY"
+                else:
+                    s["fails"] += 1
+                    # Chỉ flip UNHEALTHY sau threshold fail LIÊN TIẾP — một lần
+                    # blip mạng không phải outage (chống flapping §4).
+                    if s["fails"] >= threshold and s["status"] != "UNHEALTHY":
+                        s["status"] = "UNHEALTHY"
+                        _emit(f, region, "UNHEALTHY", reason, interval, threshold)
+            time.sleep(interval)
+
+
+def _emit(f, region: str, to: str, reason: str, interval: float, threshold: int):
+    """Ghi đúng 1 dòng khi trạng thái ĐỔI — đây là nguồn t_detect của measure_rto."""
+    line = {"ts": time.time(), "iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "event": "state_change", "region": region, "to": to, "reason": reason,
+            "consecutive_fails": threshold if to == "UNHEALTHY" else 0,
+            "interval_s": interval, "threshold": threshold}
+    f.write(json.dumps(line) + "\n")
+    f.flush()
+    print(json.dumps(line))
 
 
 if __name__ == "__main__":
